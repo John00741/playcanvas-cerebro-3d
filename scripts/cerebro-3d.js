@@ -60,6 +60,12 @@ Cerebro3D.prototype.onBrainAssetLoaded = function (asset) {
     var scale = this.radius / maxExtent;
     brain.setLocalScale(scale, scale, scale);
 
+    // The source file's pivot isn't at its geometric center. aabb.center
+    // was measured before this scale was applied (i.e. in local units), so
+    // scale it too when computing how far to shift the entity so the
+    // model's true center lands on world (0,0,0).
+    brain.setPosition(-aabb.center.x * scale, -aabb.center.y * scale, -aabb.center.z * scale);
+
     // Hollow-viewable: render both faces and flip shading for the
     // back-facing (interior) side so it isn't dark when seen from inside.
     meshInstances.forEach(function (mi) {
