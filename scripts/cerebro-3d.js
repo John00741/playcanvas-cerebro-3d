@@ -26,14 +26,13 @@ Cerebro3D.prototype.hideDefaultPrimitives = function () {
 // Layered sine/cosine displacement over a UV-sphere: cheap, dependency-free
 // stand-in for cortical folds (gyri/sulci) - stylised on purpose, matching
 // the project's "didactic, not anatomically literal" brief.
-Cerebro3D.prototype.foldedRadius = function (theta, phi) {
-    var r = this.radius;
-    var wrinkle =
-        0.16 * Math.sin(6 * theta) * Math.cos(5 * phi) +
-        0.10 * Math.sin(11 * theta + 1.7) * Math.cos(9 * phi + 0.6) +
-        0.06 * Math.sin(17 * phi) * Math.cos(13 * theta + 2.1) +
-        0.04 * Math.sin(23 * theta * phi * 0.02);
-    return r * (1 + wrinkle);
+Cerebro3D.prototype.wrinkleAt = function (theta, phi) {
+    return (
+        0.22 * Math.sin(6 * theta) * Math.cos(5 * phi) +
+        0.14 * Math.sin(11 * theta + 1.7) * Math.cos(9 * phi + 0.6) +
+        0.09 * Math.sin(17 * phi) * Math.cos(13 * theta + 2.1) +
+        0.06 * Math.sin(23 * theta * phi * 0.02)
+    );
 };
 
 Cerebro3D.prototype.buildBrainShell = function () {
@@ -42,14 +41,20 @@ Cerebro3D.prototype.buildBrainShell = function () {
     var positions = [];
     var normals = [];
     var uvs = [];
+    var colors = [];
     var indices = [];
+
+    // Base tissue tones: deep valley (sulcus) vs. raised ridge (gyrus).
+    var valley = new pc.Color(0.32, 0.09, 0.14);
+    var ridge = new pc.Color(0.92, 0.62, 0.6);
 
     for (var lat = 0; lat <= latSegments; lat++) {
         var theta = (lat / latSegments) * Math.PI; // 0..PI
         for (var lon = 0; lon <= lonSegments; lon++) {
             var phi = (lon / lonSegments) * Math.PI * 2; // 0..2PI
 
-            var r = this.foldedRadius(theta, phi);
+            var wrinkle = this.wrinkleAt(theta, phi);
+            var r = this.radius * (1 + wrinkle);
             var sinTheta = Math.sin(theta);
             var x = r * sinTheta * Math.cos(phi);
             var y = r * Math.cos(theta);
@@ -63,6 +68,16 @@ Cerebro3D.prototype.buildBrainShell = function () {
             normals.push(-x / len, -y / len, -z / len);
 
             uvs.push(lon / lonSegments, lat / latSegments);
+
+            // Map wrinkle (~ -0.5..0.5) to a valley/ridge tint so folds read
+            // clearly regardless of viewing angle or light falloff.
+            var t = pc.math.clamp(wrinkle * 2.2 + 0.5, 0, 1);
+            colors.push(
+                pc.math.lerp(valley.r, ridge.r, t),
+                pc.math.lerp(valley.g, ridge.g, t),
+                pc.math.lerp(valley.b, ridge.b, t),
+                1
+            );
         }
     }
 
@@ -84,13 +99,16 @@ Cerebro3D.prototype.buildBrainShell = function () {
     mesh.setPositions(positions);
     mesh.setNormals(normals);
     mesh.setUvs(0, uvs);
+    mesh.setColors(colors);
     mesh.setIndices(indices);
     mesh.update(pc.PRIMITIVE_TRIANGLES);
 
     var material = new pc.StandardMaterial();
-    material.diffuse = new pc.Color(0.78, 0.45, 0.52);
-    material.emissive = new pc.Color(0.22, 0.07, 0.11);
-    material.shininess = 12;
+    material.diffuse = new pc.Color(1, 1, 1);
+    material.diffuseVertexColor = true;
+    material.emissive = new pc.Color(0.12, 0.04, 0.06);
+    material.emissiveVertexColor = true;
+    material.shininess = 10;
     material.cull = pc.CULLFACE_NONE;
     material.twoSidedLighting = true;
     material.update();
