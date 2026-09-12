@@ -1,13 +1,18 @@
 var Cerebro3D = pc.createScript('cerebro3d');
 
-Cerebro3D.attributes.add('radius', { type: 'number', default: 300, title: 'Raio alvo do cerebro' });
-Cerebro3D.attributes.add('moveSpeed', { type: 'number', default: 70, title: 'Velocidade de voo' });
+Cerebro3D.attributes.add('radius', { type: 'number', default: 800, title: 'Raio alvo do cerebro' });
+Cerebro3D.attributes.add('moveSpeed', { type: 'number', default: 180, title: 'Velocidade de voo' });
 Cerebro3D.attributes.add('lookSpeed', { type: 'number', default: 0.2, title: 'Sensibilidade do mouse' });
 
 Cerebro3D.prototype.initialize = function () {
+    // Cap render resolution to 1x CSS pixels. On a HiDPI/scaled display
+    // (e.g. Windows at 125-150%) leaving this uncapped renders every frame
+    // at 1.5-2x more pixels than shown - the single biggest, easiest-to-miss
+    // cause of "travando" on a giant, screen-filling, two-sided mesh.
+    this.app.graphicsDevice.maxPixelRatio = 1;
+
     this.hideDefaultPrimitives();
     this.loadBrainModel();
-    this.buildCoreLight();
     this.setupCamera();
     this.setupControls();
 };
@@ -15,7 +20,7 @@ Cerebro3D.prototype.initialize = function () {
 // The blank-project starter ships a small box + plane; hide them, they are
 // meaningless at brain scale.
 Cerebro3D.prototype.hideDefaultPrimitives = function () {
-    var names = ['Caixa', 'Avião', 'Box', 'Plane'];
+    var names = ['Caixa', 'Avião', 'Box', 'Plane', 'Luz', 'Light'];
     var self = this;
     names.forEach(function (n) {
         var e = self.app.root.findByName(n);
@@ -66,48 +71,20 @@ Cerebro3D.prototype.onBrainAssetLoaded = function (asset) {
     // model's true center lands on world (0,0,0).
     brain.setPosition(-aabb.center.x * scale, -aabb.center.y * scale, -aabb.center.z * scale);
 
-    // Hollow-viewable: render both faces and flip shading for the
-    // back-facing (interior) side so it isn't dark when seen from inside.
-    // Also override the source material: the imported "Brain pink" material
-    // actually bakes a blue diffuse colour, and with reflectivity=1 plus
-    // useSkybox it mostly just mirrors the blue sky - neither looks like
-    // brain tissue, so force a warm pink/tan, unlit-leaning look instead.
+    // Hollow-viewable + cheap: fully unlit material. No per-pixel lighting,
+    // no specular, no scene lights needed at all - just a flat warm tone on
+    // both faces, visible from inside or out regardless of angle. This is
+    // also what actually fixed the perf ("travando"): the previous lit
+    // material was shading every pixel of a giant, screen-filling,
+    // double-sided surface against 3 lights every frame.
     meshInstances.forEach(function (mi) {
         var mat = mi.material;
         mat.cull = pc.CULLFACE_NONE;
-        mat.twoSidedLighting = true;
-        mat.diffuse = new pc.Color(0.82, 0.5, 0.48);
-        mat.useMetalness = false;
-        mat.specular = new pc.Color(0.05, 0.05, 0.05);
-        mat.shininess = 12;
-        mat.reflectivity = 0.03;
-        mat.useSkybox = false;
-        mat.emissive = new pc.Color(0.16, 0.06, 0.07);
+        mat.useLighting = false;
+        mat.diffuse = new pc.Color(0, 0, 0);
+        mat.emissive = new pc.Color(0.78, 0.42, 0.42);
         mat.update();
     });
-};
-
-Cerebro3D.prototype.buildCoreLight = function () {
-    var core = new pc.Entity('NucleoLuminoso');
-    core.addComponent('light', {
-        type: 'omni',
-        color: new pc.Color(1, 0.75, 0.5),
-        intensity: 2.4,
-        range: this.radius * 2.2
-    });
-    core.setPosition(0, 0, 0);
-    this.app.root.addChild(core);
-    this.coreLight = core;
-
-    var ambient = new pc.Entity('LuzAmbiente');
-    ambient.addComponent('light', {
-        type: 'omni',
-        color: new pc.Color(0.5, 0.35, 0.6),
-        intensity: 0.9,
-        range: this.radius * 3
-    });
-    ambient.setPosition(this.radius * 0.3, this.radius * 0.2, -this.radius * 0.3);
-    this.app.root.addChild(ambient);
 };
 
 Cerebro3D.prototype.setupCamera = function () {
@@ -116,7 +93,7 @@ Cerebro3D.prototype.setupCamera = function () {
     this.entity.setEulerAngles(0, 0, 0);
     if (this.entity.camera) {
         this.entity.camera.farClip = this.radius * 6;
-        this.entity.camera.nearClip = 0.05;
+        this.entity.camera.nearClip = 0.1;
         this.entity.camera.clearColor = new pc.Color(0.03, 0.01, 0.02);
     }
     this.yaw = 0;
@@ -156,11 +133,5 @@ Cerebro3D.prototype.update = function (dt) {
     if (dir.lengthSq() > 0) {
         dir.normalize().scale(this.moveSpeed * dt);
         this.entity.setPosition(this.entity.getPosition().clone().add(dir));
-    }
-
-    // Slow pulsing glow on the core, echoing the "living organ" feel.
-    if (this.coreLight) {
-        var pulse = 2.4 + Math.sin(Date.now() * 0.0015) * 0.6;
-        this.coreLight.light.intensity = pulse;
     }
 };
