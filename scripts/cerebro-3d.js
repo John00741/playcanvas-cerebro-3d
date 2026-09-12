@@ -1,12 +1,12 @@
 var Cerebro3D = pc.createScript('cerebro3d');
 
-Cerebro3D.attributes.add('radius', { type: 'number', default: 40, title: 'Raio do cerebro' });
+Cerebro3D.attributes.add('radius', { type: 'number', default: 40, title: 'Raio alvo do cerebro' });
 Cerebro3D.attributes.add('moveSpeed', { type: 'number', default: 18, title: 'Velocidade de voo' });
 Cerebro3D.attributes.add('lookSpeed', { type: 'number', default: 0.2, title: 'Sensibilidade do mouse' });
 
 Cerebro3D.prototype.initialize = function () {
     this.hideDefaultPrimitives();
-    this.buildBrainShell();
+    this.loadBrainModel();
     this.buildCoreLight();
     this.setupCamera();
     this.setupControls();
@@ -23,135 +23,51 @@ Cerebro3D.prototype.hideDefaultPrimitives = function () {
     });
 };
 
-// Gentle, low-amplitude rolling folds - kept subtle on purpose. At this
-// scale the *silhouette* (ovoid + hemisphere split) is what reads as
-// "brain"; strong high-frequency terms just turn the surface into spikes.
-Cerebro3D.prototype.wrinkleAt = function (theta, phi) {
-    return (
-        0.035 * Math.sin(4 * phi + 2.2 * Math.sin(2.3 * theta)) +
-        0.025 * Math.sin(7 * phi - 3 * theta + 1.3) +
-        0.018 * Math.sin(5 * theta) * Math.sin(3 * phi + 0.7) +
-        0.010 * Math.sin(13 * phi + 6 * theta)
-    );
-};
-
-// Smallest angle between two directions on a circle, handling wraparound.
-Cerebro3D.prototype.angleDelta = function (a, b) {
-    var d = Math.abs(a - b) % (Math.PI * 2);
-    return d > Math.PI ? Math.PI * 2 - d : d;
-};
-
-// Longitudinal fissure: with phi=PI/2 mapped to "top" (see buildBrainShell),
-// a single seam there runs the full front-to-back length automatically
-// (theta is the front/back parameter here), tapering to nothing at the
-// front/back poles on its own since the whole ring shrinks there too.
-Cerebro3D.prototype.fissureAt = function (phi) {
-    var seamWidth = 0.14;
-    var d = this.angleDelta(phi, Math.PI / 2);
-    return Math.exp(-(d * d) / (2 * seamWidth * seamWidth));
-};
-
-Cerebro3D.prototype.buildBrainShell = function () {
-    var latSegments = 90;
-    var lonSegments = 140;
-    var positions = [];
-    var normals = [];
-    var uvs = [];
-    var colors = [];
-    var indices = [];
-
-    // Base tissue tones: deep valley (sulcus) vs. raised ridge (gyrus).
-    var valley = new pc.Color(0.32, 0.09, 0.14);
-    var ridge = new pc.Color(0.92, 0.62, 0.6);
-    var fissureColor = new pc.Color(0.16, 0.04, 0.07);
-
-    // Ovoid proportions (front-back longer than left-right, squashed
-    // vertically) - a sphere reads as a ball no matter the surface detail.
-    // Poles sit at the front/back tips (theta axis), not on top - that way
-    // the UV-sphere's pole singularities land where a real brain actually
-    // tapers to a rounded point, instead of pinching the dorsal midline.
-    var scaleX = 0.82; // left-right (narrower)
-    var scaleY = 0.72; // top-bottom (squashed)
-    var scaleZ = 1.22; // front-back (longer, matches theta axis below)
-    var fissureDepth = 0.24;
-
-    for (var lat = 0; lat <= latSegments; lat++) {
-        var theta = (lat / latSegments) * Math.PI; // 0..PI (front pole..back pole)
-        for (var lon = 0; lon <= lonSegments; lon++) {
-            var phi = (lon / lonSegments) * Math.PI * 2; // 0..2PI (around the ring: right-top-left-bottom)
-
-            var wrinkle = this.wrinkleAt(theta, phi);
-            var fissure = this.fissureAt(phi);
-            var r = this.radius * (1 + wrinkle - fissureDepth * fissure);
-
-            var sinTheta = Math.sin(theta);
-            var x = r * sinTheta * Math.cos(phi) * scaleX;
-            var y = r * sinTheta * Math.sin(phi) * scaleY;
-            var z = r * Math.cos(theta) * scaleZ;
-
-            positions.push(x, y, z);
-
-            // Inward-pointing normal (negative of the outward radial dir)
-            // so lighting reads correctly when viewed from inside the shell.
-            var len = Math.sqrt(x * x + y * y + z * z) || 1;
-            normals.push(-x / len, -y / len, -z / len);
-
-            uvs.push(lon / lonSegments, lat / latSegments);
-
-            // Map wrinkle to a valley/ridge tint so folds read clearly up
-            // close even though the geometric displacement is subtle, and
-            // darken the fissure itself so it reads instantly from afar.
-            var t = pc.math.clamp(wrinkle * 9 + 0.5, 0, 1);
-            var cr = pc.math.lerp(valley.r, ridge.r, t);
-            var cg = pc.math.lerp(valley.g, ridge.g, t);
-            var cb = pc.math.lerp(valley.b, ridge.b, t);
-            colors.push(
-                pc.math.lerp(cr, fissureColor.r, fissure),
-                pc.math.lerp(cg, fissureColor.g, fissure),
-                pc.math.lerp(cb, fissureColor.b, fissure),
-                1
-            );
-        }
+// Uses a real brain model (imported from a downloaded glTF/GLB, CC-BY
+// "Brain" by Poly by Google) instead of a procedural approximation, scaled
+// up to a giant size and made hollow-viewable so the camera can sit inside.
+Cerebro3D.prototype.loadBrainModel = function () {
+    var asset = this.app.assets.find('brain.glb', 'model');
+    if (!asset) {
+        console.warn('cerebro3d: model asset "brain.glb" not found');
+        return;
     }
 
-    var rowSize = lonSegments + 1;
-    for (lat = 0; lat < latSegments; lat++) {
-        for (lon = 0; lon < lonSegments; lon++) {
-            var a = lat * rowSize + lon;
-            var b = a + rowSize;
-            var c = a + 1;
-            var d = b + 1;
-            // Reversed winding (relative to a standard outward sphere) so
-            // the faces are front-facing when seen from inside the shell.
-            indices.push(a, b, c);
-            indices.push(c, b, d);
-        }
+    if (asset.resource) {
+        this.onBrainAssetLoaded(asset);
+    } else {
+        asset.once('load', this.onBrainAssetLoaded, this);
+        this.app.assets.load(asset);
     }
+};
 
-    var mesh = new pc.Mesh(this.app.graphicsDevice);
-    mesh.setPositions(positions);
-    mesh.setNormals(normals);
-    mesh.setUvs(0, uvs);
-    mesh.setColors(colors);
-    mesh.setIndices(indices);
-    mesh.update(pc.PRIMITIVE_TRIANGLES);
-
-    var material = new pc.StandardMaterial();
-    material.diffuse = new pc.Color(1, 1, 1);
-    material.diffuseVertexColor = true;
-    material.emissive = new pc.Color(0.12, 0.04, 0.06);
-    material.emissiveVertexColor = true;
-    material.shininess = 10;
-    material.cull = pc.CULLFACE_NONE;
-    material.twoSidedLighting = true;
-    material.update();
-    this.shellMaterial = material;
-
-    var meshInstance = new pc.MeshInstance(mesh, material);
+Cerebro3D.prototype.onBrainAssetLoaded = function (asset) {
     var brain = new pc.Entity('CerebroCasca');
-    brain.addComponent('render', { meshInstances: [meshInstance] });
+    brain.addComponent('model', { type: 'asset', asset: asset });
     this.app.root.addChild(brain);
     this.brain = brain;
+
+    var meshInstances = brain.model.meshInstances;
+
+    // Scale the model up so it fills the target radius, regardless of the
+    // source file's original real-world units.
+    var aabb = new pc.BoundingBox();
+    meshInstances.forEach(function (mi, i) {
+        if (i === 0) aabb.copy(mi.aabb);
+        else aabb.add(mi.aabb);
+    });
+    var maxExtent = Math.max(aabb.halfExtents.x, aabb.halfExtents.y, aabb.halfExtents.z) || 1;
+    var scale = this.radius / maxExtent;
+    brain.setLocalScale(scale, scale, scale);
+
+    // Hollow-viewable: render both faces and flip shading for the
+    // back-facing (interior) side so it isn't dark when seen from inside.
+    meshInstances.forEach(function (mi) {
+        var mat = mi.material;
+        mat.cull = pc.CULLFACE_NONE;
+        mat.twoSidedLighting = true;
+        mat.update();
+    });
 };
 
 Cerebro3D.prototype.buildCoreLight = function () {
