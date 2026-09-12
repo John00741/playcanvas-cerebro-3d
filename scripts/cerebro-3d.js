@@ -23,16 +23,35 @@ Cerebro3D.prototype.hideDefaultPrimitives = function () {
     });
 };
 
-// Layered sine/cosine displacement over a UV-sphere: cheap, dependency-free
-// stand-in for cortical folds (gyri/sulci) - stylised on purpose, matching
-// the project's "didactic, not anatomically literal" brief.
+// Gentle, low-amplitude rolling folds - kept subtle on purpose. At this
+// scale the *silhouette* (ovoid + hemisphere split) is what reads as
+// "brain"; strong high-frequency terms just turn the surface into spikes.
 Cerebro3D.prototype.wrinkleAt = function (theta, phi) {
     return (
-        0.22 * Math.sin(6 * theta) * Math.cos(5 * phi) +
-        0.14 * Math.sin(11 * theta + 1.7) * Math.cos(9 * phi + 0.6) +
-        0.09 * Math.sin(17 * phi) * Math.cos(13 * theta + 2.1) +
-        0.06 * Math.sin(23 * theta * phi * 0.02)
+        0.035 * Math.sin(4 * phi + 2.2 * Math.sin(2.3 * theta)) +
+        0.025 * Math.sin(7 * phi - 3 * theta + 1.3) +
+        0.018 * Math.sin(5 * theta) * Math.sin(3 * phi + 0.7) +
+        0.010 * Math.sin(13 * phi + 6 * theta)
     );
+};
+
+// Smallest angle between two directions on a circle, handling wraparound.
+Cerebro3D.prototype.angleDelta = function (a, b) {
+    var d = Math.abs(a - b) % (Math.PI * 2);
+    return d > Math.PI ? Math.PI * 2 - d : d;
+};
+
+// Longitudinal fissure: a groove running front-to-back along the top of the
+// shell (phi = 90deg and phi = 270deg), fading out toward the underside -
+// the single most recognisable "this is a brain" cue.
+Cerebro3D.prototype.fissureAt = function (theta, phi) {
+    var seamWidth = 0.16;
+    var d1 = this.angleDelta(phi, Math.PI / 2);
+    var d2 = this.angleDelta(phi, Math.PI * 1.5);
+    var d = Math.min(d1, d2);
+    var seam = Math.exp(-(d * d) / (2 * seamWidth * seamWidth));
+    var topFade = Math.max(0, 1 - theta / (Math.PI * 0.62));
+    return seam * topFade;
 };
 
 Cerebro3D.prototype.buildBrainShell = function () {
@@ -47,6 +66,14 @@ Cerebro3D.prototype.buildBrainShell = function () {
     // Base tissue tones: deep valley (sulcus) vs. raised ridge (gyrus).
     var valley = new pc.Color(0.32, 0.09, 0.14);
     var ridge = new pc.Color(0.92, 0.62, 0.6);
+    var fissureColor = new pc.Color(0.16, 0.04, 0.07);
+
+    // Ovoid proportions (front-back longer than left-right, squashed
+    // vertically) - a sphere reads as a ball no matter the surface detail.
+    var scaleX = 0.82; // left-right (narrower)
+    var scaleY = 0.70; // top-bottom (squashed)
+    var scaleZ = 1.18; // front-back (longer)
+    var fissureDepth = 0.22;
 
     for (var lat = 0; lat <= latSegments; lat++) {
         var theta = (lat / latSegments) * Math.PI; // 0..PI
@@ -54,11 +81,13 @@ Cerebro3D.prototype.buildBrainShell = function () {
             var phi = (lon / lonSegments) * Math.PI * 2; // 0..2PI
 
             var wrinkle = this.wrinkleAt(theta, phi);
-            var r = this.radius * (1 + wrinkle);
+            var fissure = this.fissureAt(theta, phi);
+            var r = this.radius * (1 + wrinkle - fissureDepth * fissure);
+
             var sinTheta = Math.sin(theta);
-            var x = r * sinTheta * Math.cos(phi);
-            var y = r * Math.cos(theta);
-            var z = r * sinTheta * Math.sin(phi);
+            var x = r * sinTheta * Math.cos(phi) * scaleX;
+            var y = r * Math.cos(theta) * scaleY;
+            var z = r * sinTheta * Math.sin(phi) * scaleZ;
 
             positions.push(x, y, z);
 
@@ -69,13 +98,17 @@ Cerebro3D.prototype.buildBrainShell = function () {
 
             uvs.push(lon / lonSegments, lat / latSegments);
 
-            // Map wrinkle (~ -0.5..0.5) to a valley/ridge tint so folds read
-            // clearly regardless of viewing angle or light falloff.
-            var t = pc.math.clamp(wrinkle * 2.2 + 0.5, 0, 1);
+            // Map wrinkle to a valley/ridge tint so folds read clearly up
+            // close even though the geometric displacement is subtle, and
+            // darken the fissure itself so it reads instantly from afar.
+            var t = pc.math.clamp(wrinkle * 9 + 0.5, 0, 1);
+            var cr = pc.math.lerp(valley.r, ridge.r, t);
+            var cg = pc.math.lerp(valley.g, ridge.g, t);
+            var cb = pc.math.lerp(valley.b, ridge.b, t);
             colors.push(
-                pc.math.lerp(valley.r, ridge.r, t),
-                pc.math.lerp(valley.g, ridge.g, t),
-                pc.math.lerp(valley.b, ridge.b, t),
+                pc.math.lerp(cr, fissureColor.r, fissure),
+                pc.math.lerp(cg, fissureColor.g, fissure),
+                pc.math.lerp(cb, fissureColor.b, fissure),
                 1
             );
         }
