@@ -1,7 +1,7 @@
 var Cerebro3D = pc.createScript('cerebro3d');
 
-Cerebro3D.attributes.add('radius', { type: 'number', default: 40, title: 'Raio alvo do cerebro' });
-Cerebro3D.attributes.add('moveSpeed', { type: 'number', default: 18, title: 'Velocidade de voo' });
+Cerebro3D.attributes.add('radius', { type: 'number', default: 300, title: 'Raio alvo do cerebro' });
+Cerebro3D.attributes.add('moveSpeed', { type: 'number', default: 70, title: 'Velocidade de voo' });
 Cerebro3D.attributes.add('lookSpeed', { type: 'number', default: 0.2, title: 'Sensibilidade do mouse' });
 
 Cerebro3D.prototype.initialize = function () {
@@ -68,10 +68,21 @@ Cerebro3D.prototype.onBrainAssetLoaded = function (asset) {
 
     // Hollow-viewable: render both faces and flip shading for the
     // back-facing (interior) side so it isn't dark when seen from inside.
+    // Also override the source material: the imported "Brain pink" material
+    // actually bakes a blue diffuse colour, and with reflectivity=1 plus
+    // useSkybox it mostly just mirrors the blue sky - neither looks like
+    // brain tissue, so force a warm pink/tan, unlit-leaning look instead.
     meshInstances.forEach(function (mi) {
         var mat = mi.material;
         mat.cull = pc.CULLFACE_NONE;
         mat.twoSidedLighting = true;
+        mat.diffuse = new pc.Color(0.82, 0.5, 0.48);
+        mat.useMetalness = false;
+        mat.specular = new pc.Color(0.05, 0.05, 0.05);
+        mat.shininess = 12;
+        mat.reflectivity = 0.03;
+        mat.useSkybox = false;
+        mat.emissive = new pc.Color(0.16, 0.06, 0.07);
         mat.update();
     });
 };
