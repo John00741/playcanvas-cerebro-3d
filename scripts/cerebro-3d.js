@@ -5,6 +5,41 @@ Cerebro3D.attributes.add('domeAngleDeg', { type: 'number', default: 100, title: 
 Cerebro3D.attributes.add('moveSpeed', { type: 'number', default: 30, title: 'Velocidade de caminhada' });
 Cerebro3D.attributes.add('lookSpeed', { type: 'number', default: 0.2, title: 'Sensibilidade do mouse' });
 Cerebro3D.attributes.add('eyeHeight', { type: 'number', default: 1.8, title: 'Altura dos olhos do personagem' });
+Cerebro3D.attributes.add('interactRange', { type: 'number', default: 9, title: 'Distancia para interagir com uma regiao' });
+
+// As 4 regioes que vao hospedar os minijogos - cada uma e uma estacao
+// navegavel dentro da sala, nao so decoracao. O conteudo do modal aqui e
+// placeholder ate cada minijogo real ser plugado nesse mesmo gancho.
+var REGIONS = [
+    {
+        key: 'cortex',
+        name: 'Córtex Pré-frontal',
+        subtitle: 'Razão / Planejamento',
+        color: [0.35, 0.55, 0.95],
+        desc: 'Pesa consequências, prazos e planos de longo prazo antes de agir.'
+    },
+    {
+        key: 'amigdala',
+        name: 'Amígdala',
+        subtitle: 'Medo / Emoção',
+        color: [0.92, 0.30, 0.30],
+        desc: 'Reage rápido ao risco e à pressão emocional do momento.'
+    },
+    {
+        key: 'hipocampo',
+        name: 'Hipocampo',
+        subtitle: 'Memória',
+        color: [0.62, 0.40, 0.92],
+        desc: 'Puxa experiências passadas parecidas para comparar com a decisão atual.'
+    },
+    {
+        key: 'accumbens',
+        name: 'Núcleo Accumbens',
+        subtitle: 'Desejo / Prazer',
+        color: [0.95, 0.75, 0.25],
+        desc: 'Aponta para o que traz satisfação e recompensa imediata.'
+    }
+];
 
 Cerebro3D.prototype.initialize = function () {
     // Cap render resolution to 1x CSS pixels - the earlier "travando" was
@@ -15,8 +50,13 @@ Cerebro3D.prototype.initialize = function () {
     this.hideDefaultPrimitives();
     this.buildRoom();
     this.loadBrainCenterpiece();
+    this.buildRegions();
+    this.buildOverlay();
     this.setupCamera();
     this.setupControls();
+
+    this.nearRegion = null;
+    this.modalOpen = false;
 };
 
 Cerebro3D.prototype.hideDefaultPrimitives = function () {
@@ -228,6 +268,110 @@ Cerebro3D.prototype.loadBrainCenterpiece = function () {
     }
 };
 
+// Places each of the 4 regions as a real, walkable station around the
+// room's floor (not just decoration) - this is where each region's
+// minigame will eventually plug in.
+Cerebro3D.prototype.buildRegions = function () {
+    var self = this;
+    var stationRadius = this.rimRadius * 0.6;
+    this.regions = REGIONS.map(function (region, i) {
+        var angle = (i / REGIONS.length) * Math.PI * 2;
+        var pos = new pc.Vec3(
+            Math.cos(angle) * stationRadius,
+            self.domeRadius * 0.05,
+            Math.sin(angle) * stationRadius
+        );
+
+        var mat = new pc.StandardMaterial();
+        mat.diffuse = new pc.Color(0, 0, 0);
+        mat.useLighting = false;
+        mat.emissive = new pc.Color(region.color[0], region.color[1], region.color[2]);
+        mat.cull = pc.CULLFACE_NONE;
+        mat.update();
+
+        var marker = new pc.Entity('Regiao_' + region.key);
+        marker.addComponent('render', { type: 'sphere', material: mat });
+        marker.setLocalScale(self.domeRadius * 0.06, self.domeRadius * 0.1, self.domeRadius * 0.06);
+        marker.setPosition(pos);
+        self.app.root.addChild(marker);
+
+        return {
+            data: region,
+            position: pos,
+            entity: marker,
+            baseY: pos.y
+        };
+    });
+};
+
+// Single DOM-injected overlay for the interaction prompt + region modal -
+// reuses the fast "one script builds the whole UI" pattern from the 2D
+// minigame prototype instead of building PlayCanvas UI entities by hand.
+Cerebro3D.prototype.buildOverlay = function () {
+    document.documentElement.lang = 'pt-BR';
+
+    var root = document.createElement('div');
+    root.className = 'notranslate';
+    root.translate = false;
+    root.setAttribute('translate', 'no');
+    root.style.cssText = 'position:fixed;inset:0;pointer-events:none;font-family:Arial,sans-serif;z-index:1000;';
+
+    root.innerHTML =
+        '<div id="regionPrompt" style="display:none;position:absolute;bottom:60px;left:50%;transform:translateX(-50%);' +
+        'background:rgba(10,4,8,0.85);color:#fff;padding:10px 18px;border-radius:8px;font-size:15px;text-align:center;">' +
+        '</div>' +
+        '<div id="regionModal" style="display:none;position:absolute;inset:0;background:rgba(5,2,4,0.75);' +
+        'align-items:center;justify-content:center;pointer-events:auto;">' +
+        '<div style="max-width:420px;background:#1a1016;border-radius:14px;padding:28px;color:#f4eeee;' +
+        'border:2px solid var(--accent,#fff);box-shadow:0 10px 40px rgba(0,0,0,0.5);">' +
+        '<div id="regionModalTitle" style="font-size:22px;font-weight:bold;margin-bottom:2px;"></div>' +
+        '<div id="regionModalSubtitle" style="font-size:13px;opacity:0.7;margin-bottom:14px;"></div>' +
+        '<div id="regionModalDesc" style="font-size:15px;line-height:1.5;margin-bottom:10px;"></div>' +
+        '<div style="font-size:13px;opacity:0.6;margin-bottom:20px;">Minijogo desta região: em construção.</div>' +
+        '<button id="regionModalClose" style="background:#fff;border:none;border-radius:6px;padding:8px 16px;' +
+        'font-size:14px;cursor:pointer;">Fechar (Esc)</button>' +
+        '</div></div>';
+
+    document.body.appendChild(root);
+    this.overlayRoot = root;
+    this.promptEl = root.querySelector('#regionPrompt');
+    this.modalEl = root.querySelector('#regionModal');
+
+    var self = this;
+    root.querySelector('#regionModalClose').addEventListener('click', function () {
+        self.closeModal();
+    });
+};
+
+Cerebro3D.prototype.showPrompt = function (region) {
+    this.promptEl.textContent = 'Pressione E — ' + region.data.name;
+    this.promptEl.style.display = 'block';
+};
+
+Cerebro3D.prototype.hidePrompt = function () {
+    this.promptEl.style.display = 'none';
+};
+
+Cerebro3D.prototype.openModal = function (region) {
+    this.modalOpen = true;
+    document.exitPointerLock();
+    this.hidePrompt();
+
+    var c = region.data.color;
+    var accent = 'rgb(' + Math.round(c[0] * 255) + ',' + Math.round(c[1] * 255) + ',' + Math.round(c[2] * 255) + ')';
+    this.modalEl.querySelector('#regionModalTitle').textContent = region.data.name;
+    this.modalEl.querySelector('#regionModalTitle').style.color = accent;
+    this.modalEl.querySelector('#regionModalSubtitle').textContent = region.data.subtitle;
+    this.modalEl.querySelector('#regionModalDesc').textContent = region.data.desc;
+    this.modalEl.style.setProperty('--accent', accent);
+    this.modalEl.style.display = 'flex';
+};
+
+Cerebro3D.prototype.closeModal = function () {
+    this.modalOpen = false;
+    this.modalEl.style.display = 'none';
+};
+
 Cerebro3D.prototype.setupCamera = function () {
     // This script is expected on the camera entity itself.
     this.entity.setPosition(0, this.eyeHeight, this.rimRadius * 0.5);
@@ -262,6 +406,45 @@ Cerebro3D.prototype.setupControls = function () {
 
 Cerebro3D.prototype.update = function (dt) {
     var keyboard = this.app.keyboard;
+
+    // Gentle bob so the region markers read as active stations, not props.
+    var t = Date.now() * 0.002;
+    this.regions.forEach(function (region, i) {
+        var pos = region.entity.getPosition();
+        region.entity.setPosition(pos.x, region.baseY + Math.sin(t + i) * 1.5, pos.z);
+        region.entity.rotate(0, dt * 20, 0);
+    });
+
+    if (keyboard.wasPressed(pc.KEY_ESCAPE) && this.modalOpen) {
+        this.closeModal();
+    }
+
+    if (this.modalOpen) return;
+
+    // Find the nearest region within interaction range, show its prompt,
+    // and let E open that region's station (future minigame entry point).
+    var camPos = this.entity.getPosition();
+    var nearest = null;
+    var nearestDist = this.interactRange;
+    this.regions.forEach(function (region) {
+        var dx = region.position.x - camPos.x;
+        var dz = region.position.z - camPos.z;
+        var dist = Math.sqrt(dx * dx + dz * dz);
+        if (dist < nearestDist) {
+            nearestDist = dist;
+            nearest = region;
+        }
+    });
+
+    if (nearest !== this.nearRegion) {
+        this.nearRegion = nearest;
+        if (nearest) this.showPrompt(nearest);
+        else this.hidePrompt();
+    }
+
+    if (this.nearRegion && keyboard.wasPressed(pc.KEY_E)) {
+        this.openModal(this.nearRegion);
+    }
 
     // Walk on the floor plane: movement follows facing yaw only (pitch is
     // ignored) so looking up/down never launches the character into the
