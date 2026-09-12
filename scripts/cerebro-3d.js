@@ -41,17 +41,14 @@ Cerebro3D.prototype.angleDelta = function (a, b) {
     return d > Math.PI ? Math.PI * 2 - d : d;
 };
 
-// Longitudinal fissure: a groove running front-to-back along the top of the
-// shell (phi = 90deg and phi = 270deg), fading out toward the underside -
-// the single most recognisable "this is a brain" cue.
-Cerebro3D.prototype.fissureAt = function (theta, phi) {
-    var seamWidth = 0.16;
-    var d1 = this.angleDelta(phi, Math.PI / 2);
-    var d2 = this.angleDelta(phi, Math.PI * 1.5);
-    var d = Math.min(d1, d2);
-    var seam = Math.exp(-(d * d) / (2 * seamWidth * seamWidth));
-    var topFade = Math.max(0, 1 - theta / (Math.PI * 0.62));
-    return seam * topFade;
+// Longitudinal fissure: with phi=PI/2 mapped to "top" (see buildBrainShell),
+// a single seam there runs the full front-to-back length automatically
+// (theta is the front/back parameter here), tapering to nothing at the
+// front/back poles on its own since the whole ring shrinks there too.
+Cerebro3D.prototype.fissureAt = function (phi) {
+    var seamWidth = 0.14;
+    var d = this.angleDelta(phi, Math.PI / 2);
+    return Math.exp(-(d * d) / (2 * seamWidth * seamWidth));
 };
 
 Cerebro3D.prototype.buildBrainShell = function () {
@@ -70,24 +67,27 @@ Cerebro3D.prototype.buildBrainShell = function () {
 
     // Ovoid proportions (front-back longer than left-right, squashed
     // vertically) - a sphere reads as a ball no matter the surface detail.
+    // Poles sit at the front/back tips (theta axis), not on top - that way
+    // the UV-sphere's pole singularities land where a real brain actually
+    // tapers to a rounded point, instead of pinching the dorsal midline.
     var scaleX = 0.82; // left-right (narrower)
-    var scaleY = 0.70; // top-bottom (squashed)
-    var scaleZ = 1.18; // front-back (longer)
-    var fissureDepth = 0.22;
+    var scaleY = 0.72; // top-bottom (squashed)
+    var scaleZ = 1.22; // front-back (longer, matches theta axis below)
+    var fissureDepth = 0.24;
 
     for (var lat = 0; lat <= latSegments; lat++) {
-        var theta = (lat / latSegments) * Math.PI; // 0..PI
+        var theta = (lat / latSegments) * Math.PI; // 0..PI (front pole..back pole)
         for (var lon = 0; lon <= lonSegments; lon++) {
-            var phi = (lon / lonSegments) * Math.PI * 2; // 0..2PI
+            var phi = (lon / lonSegments) * Math.PI * 2; // 0..2PI (around the ring: right-top-left-bottom)
 
             var wrinkle = this.wrinkleAt(theta, phi);
-            var fissure = this.fissureAt(theta, phi);
+            var fissure = this.fissureAt(phi);
             var r = this.radius * (1 + wrinkle - fissureDepth * fissure);
 
             var sinTheta = Math.sin(theta);
             var x = r * sinTheta * Math.cos(phi) * scaleX;
-            var y = r * Math.cos(theta) * scaleY;
-            var z = r * sinTheta * Math.sin(phi) * scaleZ;
+            var y = r * sinTheta * Math.sin(phi) * scaleY;
+            var z = r * Math.cos(theta) * scaleZ;
 
             positions.push(x, y, z);
 
